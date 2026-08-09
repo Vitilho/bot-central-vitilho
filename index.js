@@ -69,3 +69,11 @@ bot.launch();
 console.log('🤖 Bot rodando com arquitetura modular!');
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+// 🌐 SERVIDOR WEB FANTASMA (Para o Render manter o bot online)
+const http = require('http');
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.write('Bot da Central do Vitilho operante!');
+    res.end();
+}).listen(PORT, () => console.log(`Servidor web rodando na porta ${PORT}`));
