@@ -1,0 +1,4 @@
+node_modules/
+.env
+debug_mercadolivre.png
+package-lock.json
