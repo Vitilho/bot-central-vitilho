@@ -54,7 +54,13 @@ bot.on('text', async (ctx) => {
         
         const dadosReais = await extrairDadosMercadoLivre(texto);
 
-        if (dadosReais) {
+        // Se deu erro de renderização, o bot te manda o print na hora!
+        if (dadosReais && dadosReais.erroDebug) {
+            await ctx.reply('❌ Fiquei preso nesta tela lá no servidor da nuvem (veja o print):');
+            await ctx.replyWithPhoto({ source: dadosReais.imagemPrint });
+        } 
+        // Se deu tudo certo, segue o fluxo normal
+        else if (dadosReais) {
             estadosBot.set(chatId, dadosReais);
             ctx.reply(`✅ *Dados Encontrados!*\nProduto: ${dadosReais.produto}\nPreço Atual: R$ ${dadosReais.precoPor}\n\n👉 *Tem algum cupom para esse produto?*\n\nSe sim, responda com o nome e o preço final separados por uma barra em pé. Exemplo:\n*FERPANDINHA10 | 69,30*\n\nSe não, digite apenas *NÃO*.`);
         } else {

@@ -61,9 +61,10 @@ async function extrairDadosMercadoLivre(url) {
         } catch (e) {
             console.log("⚠️ O título não apareceu! Tirando novo print para investigar...");
             await page.screenshot({ path: 'debug_mercadolivre.png', fullPage: true });
-            console.log("✅ Print salvo. Abortando raspagem.");
+            console.log("✅ Print salvo. Retornando a imagem para o Telegram.");
             await browser.close();
-            return null;
+            // Em vez de retornar null, ele retorna um aviso de erro e o caminho da imagem
+            return { erroDebug: true, imagemPrint: 'debug_mercadolivre.png' };
         }
         
         const html = await page.content();
