@@ -61,8 +61,13 @@ async function extrairDadosMercadoLivre(url) {
         const idProduto = matchMLB[1].replace(/[-_]/g, '');
         console.log(`📡 Buscando dados via API Oficial para o ID: ${idProduto}`);
 
-        // 4. Conexão direta com a API Pública
-        const apiRes = await axios.get(`https://api.mercadolibre.com/items/${idProduto}`);
+        // 4. Conexão direta com a API Pública (Agora com disfarce de navegador)
+        const apiRes = await axios.get(`https://api.mercadolibre.com/items/${idProduto}`, { 
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': 'application/json, text/plain, */*'
+            }
+        });
         const dados = apiRes.data;
 
         // 5. Mapear os dados de forma limpa e direta
