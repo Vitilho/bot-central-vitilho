@@ -4,7 +4,10 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
 
-const formatarPreco = (num) => num.toFixed(2).replace('.', ',');
+const formatarPreco = (num) => {
+    if (num === null || num === undefined) return "0,00";
+    return num.toFixed(2).replace('.', ',');
+};
 
 // 🕷️ Função de Extração (Puppeteer Híbrido: Bypass + Leitura de API)
 async function extrairDadosMercadoLivre(url) {
@@ -68,6 +71,13 @@ async function extrairDadosMercadoLivre(url) {
         await browser.close(); // Missão cumprida, fechamos o navegador na hora!
 
         const dados = JSON.parse(jsonText);
+
+        // 🚨 TRAVA DE SEGURANÇA: Se não vier o preço, mostra o que o ML respondeu!
+        if (!dados.price) {
+            console.log("⚠️ A API falhou ou não retornou preço. Resposta do ML:");
+            console.log(jsonText.substring(0, 300)); // Imprime os primeiros 300 caracteres
+            return null;
+        }
 
         // 5. Mapear os dados de forma limpa e direta
         const titulo = dados.title;
