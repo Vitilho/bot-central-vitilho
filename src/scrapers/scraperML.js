@@ -57,7 +57,7 @@ async function extrairDadosMercadoLivre(url) {
 
         try {
             console.log("⏳ Aguardando o título carregar na tela principal...");
-            await page.waitForSelector('h1.ui-pdp-title', { timeout: 8000 });
+            await page.waitForSelector('h1.ui-pdp-title', { timeout: 35000 });
         } catch (e) {
             console.log("⚠️ O título não apareceu! Tirando novo print para investigar...");
             await page.screenshot({ path: 'debug_mercadolivre.png', fullPage: true });
