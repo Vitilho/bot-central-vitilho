@@ -4,15 +4,17 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
 
-// 🕷️ Função de Web Scraping (Puppeteer com Bypass Visual)
+// Função auxiliar para garantir o formato R$ 00,00 correto no servidor Linux
+const formatarPreco = (num) => num.toFixed(2).replace('.', ',');
+
+// 🕷️ Função de Extração (Híbrida: Puppeteer + API Oficial)
 async function extrairDadosMercadoLivre(url) {
     let browser;
     try {
         let urlFinal = url;
-        const headersAxios = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-        };
+        const headersAxios = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' };
 
+        // 1. Desencurtador rápido (meli.la)
         if (url.includes('meli.la')) {
             try {
                 const res = await axios.get(url, { headers: headersAxios });
@@ -22,21 +24,16 @@ async function extrairDadosMercadoLivre(url) {
             }
         }
 
-        console.log("🤖 Abrindo Chrome Fantasma (Stealth Mode)...");
-        browser = await puppeteer.launch({ 
-            headless: true, 
-            defaultViewport: { width: 1366, height: 768 },
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'] 
-        });
-        
-        const page = await browser.newPage();
-        await page.setExtraHTTPHeaders({ 'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7' });
-
-        console.log("🌐 Acessando URL inicial...");
-        await page.goto(urlFinal, { waitUntil: 'networkidle2', timeout: 30000 });
-        
-        if (page.url().includes('/social/')) {
-            console.log("🎯 Vitrine detectada! Procurando o botão 'Ir para produto'...");
+        // 2. Navegador Invisível APENAS para contornar a Vitrine (/social/)
+        if (urlFinal.includes('/social/')) {
+            console.log("🤖 Abrindo Chrome Fantasma apenas para passar a vitrine...");
+            browser = await puppeteer.launch({ 
+                headless: true, 
+                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'] 
+            });
+            
+            const page = await browser.newPage();
+            await page.goto(urlFinal, { waitUntil: 'networkidle2', timeout: 30000 });
             
             const linkProduto = await page.evaluate(() => {
                 const botoes = Array.from(document.querySelectorAll('a'));
@@ -48,85 +45,68 @@ async function extrairDadosMercadoLivre(url) {
             });
 
             if (linkProduto) {
-                console.log("🔗 Link do produto encontrado! Navegando para: " + linkProduto);
-                await page.goto(linkProduto, { waitUntil: 'networkidle2', timeout: 30000 });
-            } else {
-                console.log("⚠️ Não consegui achar o botão na vitrine.");
+                urlFinal = linkProduto;
             }
+            await browser.close(); // Já temos o link, matamos o navegador na hora!
         }
 
-        try {
-            console.log("⏳ Aguardando o título carregar na tela principal...");
-            await page.waitForSelector('h1.ui-pdp-title', { timeout: 35000 });
-        } catch (e) {
-            console.log("⚠️ O título não apareceu! Tirando novo print para investigar...");
-            await page.screenshot({ path: 'debug_mercadolivre.png', fullPage: true });
-            console.log("✅ Print salvo. Retornando a imagem para o Telegram.");
-            await browser.close();
-            // Em vez de retornar null, ele retorna um aviso de erro e o caminho da imagem
-            return { erroDebug: true, imagemPrint: 'debug_mercadolivre.png' };
+        // 3. A INTELIGÊNCIA: Extrair o ID MLB da URL final
+        const matchMLB = urlFinal.match(/(MLB[-_]?\d+)/i);
+        if (!matchMLB) {
+            console.log("❌ Não achei o ID do produto na URL:", urlFinal);
+            return null;
         }
         
-        const html = await page.content();
-        await browser.close(); 
+        // Limpa o ID (remove hifens para bater na API certinho, ex: MLB1234567)
+        const idProduto = matchMLB[1].replace(/[-_]/g, '');
+        console.log(`📡 Buscando dados via API Oficial para o ID: ${idProduto}`);
+
+        // 4. Conexão direta com a API Pública
+        const apiRes = await axios.get(`https://api.mercadolibre.com/items/${idProduto}`);
+        const dados = apiRes.data;
+
+        // 5. Mapear os dados de forma limpa e direta
+        const titulo = dados.title;
+        const freteGratis = dados.shipping && dados.shipping.free_shipping;
         
-        const $ = cheerio.load(html);
+        // Pega a imagem de maior qualidade disponível
+        let urlImagem = (dados.pictures && dados.pictures.length > 0) 
+            ? dados.pictures[0].secure_url 
+            : dados.secure_thumbnail;
 
-        const h1 = $('h1.ui-pdp-title');
-        const titulo = h1.text().trim();
-        const containerPrincipal = h1.closest('.ui-pdp-main-container').length > 0 ? h1.closest('.ui-pdp-main-container') : $('body');
-
-        let urlImagem = $('meta[property="og:image"]').attr('content');
-        if (!urlImagem || !urlImagem.includes('http')) {
-            urlImagem = containerPrincipal.find('.ui-pdp-gallery__figure img, img.ui-pdp-image').first().attr('src');
-        }
-
-        let blocoPreco = containerPrincipal.find('.ui-pdp-price__main-container').first();
-        if (blocoPreco.length === 0) blocoPreco = containerPrincipal.find('.ui-pdp-price').first();
-
-        const pegarPreco = (seletorBase) => {
-            const reais = blocoPreco.find(`${seletorBase} .andes-money-amount__fraction`).first().text().trim();
-            const centavos = blocoPreco.find(`${seletorBase} .andes-money-amount__cents`).first().text().trim();
-            if (!reais) return "";
-            return centavos ? `${reais},${centavos}` : `${reais},00`;
-        };
-
-        let precoPorStr = pegarPreco('.ui-pdp-price__second-line');
-        if (!precoPorStr) precoPorStr = pegarPreco(''); 
-        const precoDeStr = pegarPreco('.ui-pdp-price__original-value');
-        
-        const freteGratis = containerPrincipal.text().toLowerCase().includes('grátis');
-        let nomeLoja = containerPrincipal.find('.ui-pdp-seller__link-trigger').first().text().trim() || containerPrincipal.find('.ui-pdp-seller-header__title').first().text().trim();
-        
+        let precoPorNum = dados.price;
+        let precoDeNum = dados.original_price;
         let descCalculado = "";
-        let numDe = 0;
-        if (precoDeStr && precoPorStr) {
-            numDe = parseFloat(precoDeStr.replace('.', '').replace(',', '.'));
-            const numPor = parseFloat(precoPorStr.replace('.', '').replace(',', '.'));
-            if (numDe > numPor) {
-                descCalculado = `-${Math.round(((numDe - numPor) / numDe) * 100)}%`;
-            }
+        let precoDeStr = "";
+        
+        // Regra de cálculo de desconto
+        if (precoDeNum && precoDeNum > precoPorNum) {
+            precoDeStr = formatarPreco(precoDeNum);
+            descCalculado = `-${Math.round(((precoDeNum - precoPorNum) / precoDeNum) * 100)}%`;
+        } else {
+            precoDeNum = 0;
         }
+
+        const precoPorStr = formatarPreco(precoPorNum);
 
         return {
             produto: titulo,
             precoDe: precoDeStr,
             precoPor: precoPorStr,
-            numDeOriginal: numDe,
+            numDeOriginal: precoDeNum,
             descCalculado: descCalculado,
             freteGratis: freteGratis,
-            link: url, 
-            loja: nomeLoja || "Mercado Livre",
+            link: url, // Retorna sempre o link curtinho que você colou no chat
+            loja: "Mercado Livre",
             cupom: "",
             imagem: urlImagem
         };
 
     } catch (error) {
-        console.error("Erro no Web Scraping:", error.message);
-        if (browser) await browser.close(); 
+        console.error("Erro no fluxo da API:", error.message);
+        if (browser) await browser.close();
         return null;
     }
 }
 
-// Exportando a função para o index.js
 module.exports = { extrairDadosMercadoLivre };
