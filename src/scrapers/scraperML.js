@@ -50,11 +50,16 @@ async function extrairDadosMercadoLivre(url) {
         }
 
         // 3. Extrair ID para montar a URL Limpa
-        const matchMLB = urlFinal.match(/(MLB[-_]?\d+)/i);
+        const matchMLB = urlFinal.match(/(MLB)[-_]?(\d+)/i);
         if (!matchMLB) {
             console.log("❌ Não achei o ID do produto.");
             return null;
         }
+        
+        // Separa apenas os números para evitar a duplicação do "MLB"
+        const numerosId = matchMLB[2]; 
+        const urlProdutoLimpa = `https://produto.mercadolivre.com.br/MLB-${numerosId}`;
+        console.log(`📡 Buscando HTML da página via Proxy para o ID: MLB-${numerosId}`);
         
         const idProduto = matchMLB[1].replace(/[-_]/g, '');
         const urlProdutoLimpa = `https://produto.mercadolivre.com.br/MLB-${idProduto}`;
