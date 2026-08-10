@@ -4,12 +4,13 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
 
+// Função segura para formatar preço
 const formatarPreco = (num) => {
     if (num === null || num === undefined) return "0,00";
     return num.toFixed(2).replace('.', ',');
 };
 
-// 🕷️ Função de Extração (Puppeteer Híbrido: Bypass + Leitura de API)
+// 🕷️ Função de Extração (Vitrine no Puppeteer + API via Proxy Residencial)
 async function extrairDadosMercadoLivre(url) {
     let browser;
     try {
@@ -26,16 +27,15 @@ async function extrairDadosMercadoLivre(url) {
             }
         }
 
-        console.log("🤖 Abrindo Chrome Fantasma...");
-        browser = await puppeteer.launch({ 
-            headless: true, 
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'] 
-        });
-        const page = await browser.newPage();
-        
-        // 2. Bypass da Vitrine (/social/)
+        // 2. Bypass da Vitrine (/social/) usando o Puppeteer (Ele passa liso por aqui)
         if (urlFinal.includes('/social/')) {
-            console.log("🎯 Vitrine detectada! Procurando o botão 'Ir para produto'...");
+            console.log("🤖 Abrindo Chrome Fantasma apenas para passar a vitrine...");
+            browser = await puppeteer.launch({ 
+                headless: true, 
+                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'] 
+            });
+            const page = await browser.newPage();
+            
             await page.goto(urlFinal, { waitUntil: 'networkidle2', timeout: 30000 });
             
             const linkProduto = await page.evaluate(() => {
@@ -50,45 +50,52 @@ async function extrairDadosMercadoLivre(url) {
             if (linkProduto) {
                 urlFinal = linkProduto;
             }
+            await browser.close(); 
         }
 
-        // 3. A INTELIGÊNCIA: Extrair o ID MLB da URL final
+        // 3. Extrair o ID MLB da URL final
         const matchMLB = urlFinal.match(/(MLB[-_]?\d+)/i);
         if (!matchMLB) {
             console.log("❌ Não achei o ID do produto na URL:", urlFinal);
-            await browser.close();
             return null;
         }
         
         const idProduto = matchMLB[1].replace(/[-_]/g, '');
-        console.log(`📡 Buscando dados via API Oficial (pelo Chrome) para o ID: ${idProduto}`);
+        console.log(`📡 Buscando dados via API Oficial para o ID: ${idProduto}`);
 
-        // 4. Conexão com a API usando o Navegador Invisível (O Pulo do Gato)
-        await page.goto(`https://api.mercadolibre.com/items/${idProduto}`, { waitUntil: 'domcontentloaded' });
+        // 4. A MÁGICA: Bater na API do Mercado Livre usando o Proxy Residencial
+        const urlApiML = `https://api.mercadolibre.com/items/${idProduto}`;
+        const apiKey = process.env.SCRAPERAPI_KEY;
+
+        let dadosDaApi;
         
-        // Pega o texto puro renderizado na tela (o JSON da API)
-        const jsonText = await page.evaluate(() => document.body.textContent);
-        await browser.close(); // Missão cumprida, fechamos o navegador na hora!
+        if (apiKey) {
+            console.log("🛡️ Roteando requisição através do Proxy Residencial...");
+            const proxyUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(urlApiML)}`;
+            const apiRes = await axios.get(proxyUrl);
+            dadosDaApi = apiRes.data; 
+        } else {
+            console.log("⚠️ Proxy não configurado! Tentando acesso direto (pode gerar erro 403)...");
+            const apiRes = await axios.get(urlApiML, { headers: headersAxios });
+            dadosDaApi = apiRes.data;
+        }
 
-        const dados = JSON.parse(jsonText);
-
-        // 🚨 TRAVA DE SEGURANÇA: Se não vier o preço, mostra o que o ML respondeu!
-        if (!dados.price) {
-            console.log("⚠️ A API falhou ou não retornou preço. Resposta do ML:");
-            console.log(jsonText.substring(0, 300)); // Imprime os primeiros 300 caracteres
+        // 🚨 TRAVA DE SEGURANÇA
+        if (!dadosDaApi || !dadosDaApi.price) {
+            console.log("⚠️ A API falhou ou não retornou preço.");
             return null;
         }
 
         // 5. Mapear os dados de forma limpa e direta
-        const titulo = dados.title;
-        const freteGratis = dados.shipping && dados.shipping.free_shipping;
+        const titulo = dadosDaApi.title;
+        const freteGratis = dadosDaApi.shipping && dadosDaApi.shipping.free_shipping;
         
-        let urlImagem = (dados.pictures && dados.pictures.length > 0) 
-            ? dados.pictures[0].secure_url 
-            : dados.secure_thumbnail;
+        let urlImagem = (dadosDaApi.pictures && dadosDaApi.pictures.length > 0) 
+            ? dadosDaApi.pictures[0].secure_url 
+            : dadosDaApi.secure_thumbnail;
 
-        let precoPorNum = dados.price;
-        let precoDeNum = dados.original_price;
+        let precoPorNum = dadosDaApi.price;
+        let precoDeNum = dadosDaApi.original_price;
         let descCalculado = "";
         let precoDeStr = "";
         
@@ -115,7 +122,7 @@ async function extrairDadosMercadoLivre(url) {
         };
 
     } catch (error) {
-        console.error("Erro no fluxo do Puppeteer/API:", error.message);
+        console.error("Erro no fluxo do Proxy/API:", error.message);
         if (browser) await browser.close();
         return null;
     }
