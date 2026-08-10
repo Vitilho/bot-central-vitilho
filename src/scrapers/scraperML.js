@@ -70,9 +70,12 @@ async function extrairDadosMercadoLivre(url) {
         let dadosDaApi;
         
         if (apiKey) {
-            console.log("🛡️ Roteando requisição através do Proxy Residencial...");
-            const proxyUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(urlApiML)}`;
-            const apiRes = await axios.get(proxyUrl);
+            console.log("🛡️ Roteando requisição através do Proxy Residencial (com disfarce)...");
+            // Adicionamos o keep_headers=true para forçar o proxy a usar o nosso User-Agent
+            const proxyUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(urlApiML)}&keep_headers=true`;
+            
+            // Passamos o headersAxios para o Axios enviar ao Proxy
+            const apiRes = await axios.get(proxyUrl, { headers: headersAxios });
             dadosDaApi = apiRes.data; 
         } else {
             console.log("⚠️ Proxy não configurado! Tentando acesso direto (pode gerar erro 403)...");
