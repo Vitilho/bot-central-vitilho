@@ -73,7 +73,7 @@ bot.on('text', async (ctx) => {
 
 bot.launch({ 
     dropPendingUpdates: true, 
-    handlerTimeout: Infinity 
+    handlerTimeout: 900000 
 });
 console.log('🤖 Bot rodando com arquitetura modular!');
 process.once('SIGINT', () => bot.stop('SIGINT'));
