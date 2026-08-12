@@ -7,7 +7,7 @@ const { montarLayout } = require('./src/layouts/layoutML');
 const { extrairDadosMercadoLivre } = require('./src/scrapers/scraperML');
 
 const token = process.env.TELEGRAM_TOKEN;
-const bot = new Telegraf(token);
+const bot = new Telegraf(process.env.BOT_TOKEN, { handlerTimeout: 900000 });
 
 const estadosBot = new Map();
 
@@ -71,10 +71,8 @@ bot.on('text', async (ctx) => {
     }
 });
 
-bot.launch({ 
-    dropPendingUpdates: true, 
-    handlerTimeout: 900000 
-});
+// A última linha deve voltar a ficar apenas assim:
+bot.launch({ dropPendingUpdates: true });
 console.log('🤖 Bot rodando com arquitetura modular!');
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
