@@ -61,17 +61,35 @@ async function extrairDadosMercadoLivre(url) {
         const urlProdutoLimpa = `https://produto.mercadolivre.com.br/MLB-${numerosId}`;
         console.log(`📡 Buscando HTML da página via Proxy para o ID: MLB-${numerosId}`);    
 
-        // 4. ScraperAPI buscando o HTML puro da página (Rota SEO)
+        // 4. ScraperAPI buscando o HTML puro da página (Com sistema de Retries)
         const apiKey = process.env.SCRAPERAPI_KEY;
         let html;
+        let tentativas = 3;
+        let sucessoProxy = false;
 
-        if (apiKey) {
-            const proxyUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(urlProdutoLimpa)}`;
-            const apiRes = await axios.get(proxyUrl);
-            html = apiRes.data;
-        } else {
-            const apiRes = await axios.get(urlProdutoLimpa, { headers: headersAxios });
-            html = apiRes.data;
+        while (tentativas > 0 && !sucessoProxy) {
+            try {
+                if (apiKey) {
+                    const proxyUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(urlProdutoLimpa)}&premium=true&country_code=br`;
+                    // Configuramos um timeout no Axios para ele não ficar preso esperando o ScraperAPI eternamente
+                    const apiRes = await axios.get(proxyUrl, { timeout: 35000 });
+                    html = apiRes.data;
+                    sucessoProxy = true;
+                } else {
+                    const apiRes = await axios.get(urlProdutoLimpa, { headers: headersAxios });
+                    html = apiRes.data;
+                    sucessoProxy = true;
+                }
+            } catch (erroProxy) {
+                tentativas--;
+                console.log(`⚠️ Ocorreu uma instabilidade no Proxy. Tentativas restantes: ${tentativas}`);
+                if (tentativas === 0) {
+                    console.log("❌ O Proxy falhou em todas as tentativas.");
+                    throw erroProxy; // Joga para o catch final da função
+                }
+                // Pausa de 2 segundos antes de tentar de novo (dá tempo do ScraperAPI trocar a rota)
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
         }
 
         // 5. Cheerio recorta os dados das tags do Google
