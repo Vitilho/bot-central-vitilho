@@ -15,33 +15,27 @@ async function extrairDadosMercadoLivre(url) {
 
         // 1. Usamos o Fantasma APENAS para resolver links encurtados ou vitrines
         if (url.includes('meli.la') || url.includes('/social/')) {
-            console.log("🤖 Abrindo Chrome Fantasma apenas para resolver o link...");
+            console.log("🤖 Abrindo Chrome Fantasma apenas para extrair o ID oculto...");
             browser = await puppeteer.launch({ 
                 headless: true, 
-                args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'] 
             });
             const page = await browser.newPage();
             
             await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            
+            // Pausa rápida de 2 segundos para o JavaScript da vitrine montar os links na tela
+            await new Promise(resolve => setTimeout(resolve, 2000));
 
-            if (page.url().includes('/social/')) {
-                console.log("🎯 Vitrine detectada! Aguardando redirecionamento...");
-                await page.waitForNavigation({ timeout: 4000, waitUntil: 'domcontentloaded' }).catch(() => {});
-                
-                if (page.url().includes('/social/')) {
-                    const linkProduto = await page.evaluate(() => {
-                        const btn = document.querySelector('a.andes-button--primary');
-                        return btn ? btn.href : null;
-                    });
-                    if (linkProduto) urlFinal = linkProduto;
-                } else {
-                    urlFinal = page.url();
-                }
-            } else {
-                urlFinal = page.url();
-            }
+            // A SACADA: Varrer a tela inteira atrás de qualquer link que contenha o ID do produto
+            urlFinal = await page.evaluate(() => {
+                const links = Array.from(document.querySelectorAll('a'));
+                const linkComID = links.find(l => l.href.match(/MLB[-_]?\d+/i));
+                return linkComID ? linkComID.href : window.location.href;
+            });
+            
             await browser.close();
-            console.log("✅ Link resolvido!");
+            console.log("✅ Link resolvido para: " + urlFinal);
         }
 
         // 2. Extraímos o ID limpo (MLB + Números)
