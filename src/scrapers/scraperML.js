@@ -37,20 +37,52 @@ async function extrairDadosMercadoLivre(url) {
             await browser.close();
             console.log("✅ Link resolvido para: " + urlFinal);
         }
+        
+        // 2. Extração Inteligente do ID (Prioriza parâmetros reais do anúncio)
+        let idProduto = null;
+        try {
+            const urlObj = new URL(urlFinal);
+            // Procura nos parâmetros da URL primeiro (onde ficam os IDs verdadeiros em links de catálogo)
+            const wid = urlObj.searchParams.get('wid') || urlObj.searchParams.get('item_id');
+            if (wid && wid.toUpperCase().startsWith('MLB')) {
+                idProduto = wid.toUpperCase();
+            }
+        } catch (e) { }
 
-        // 2. Extraímos o ID limpo (MLB + Números)
-        const matchMLB = urlFinal.match(/(MLB)[-_]?(\d+)/i);
-        if (!matchMLB) {
-            console.log("❌ Não achei o ID do produto na URL:", urlFinal);
-            return null;
+        // Se não achou nos parâmetros, faz o fallback para a Regex tradicional
+        if (!idProduto) {
+            const matchMLB = urlFinal.match(/(MLB)[-_]?(\d+)/i);
+            if (!matchMLB) {
+                console.log("❌ Não achei o ID do produto na URL:", urlFinal);
+                return null;
+            }
+            idProduto = `MLB${matchMLB[2]}`;
         }
         
-        const idProduto = `MLB${matchMLB[2]}`;
         console.log(`📡 Consultando a API Oficial do ML para o ID: ${idProduto}`);
 
-        // 3. O XEQUE-MATE: Bater na API pública (Livre de Captchas HTML)
-        const apiRes = await axios.get(`https://api.mercadolibre.com/items/${idProduto}`);
-        const dados = apiRes.data;
+        // 3. O XEQUE-MATE: Bater na API pública com Disfarce e Plano de Fuga
+        const headersAxios = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' };
+        const urlApiML = `https://api.mercadolibre.com/items/${idProduto}`;
+        let dados;
+
+        try {
+            // Tenta o acesso direto disfarçado de humano
+            const apiRes = await axios.get(urlApiML, { headers: headersAxios });
+            dados = apiRes.data;
+        } catch (err) {
+            if (err.response && (err.response.status === 403 || err.response.status === 401)) {
+                console.log("⚠️ IP do Render bloqueado na API (403). Acionando rota pelo Proxy...");
+                const apiKey = process.env.SCRAPERAPI_KEY;
+                if (!apiKey) throw err;
+                
+                const proxyUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(urlApiML)}`;
+                const proxyRes = await axios.get(proxyUrl, { headers: headersAxios });
+                dados = proxyRes.data;
+            } else {
+                throw err;
+            }
+        }
 
         // 4. Mapear o JSON limpinho
         const titulo = dados.title;
@@ -58,7 +90,6 @@ async function extrairDadosMercadoLivre(url) {
         const precoDeNum = dados.original_price || 0;
         const freteGratis = dados.shipping && dados.shipping.free_shipping;
         
-        // Pega a primeira imagem de alta qualidade
         const urlImagem = (dados.pictures && dados.pictures.length > 0) 
             ? dados.pictures[0].secure_url 
             : dados.thumbnail;
