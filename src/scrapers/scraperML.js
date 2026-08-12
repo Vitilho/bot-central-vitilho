@@ -18,7 +18,7 @@ async function extrairDadosMercadoLivre(url) {
         });
         const page = await browser.newPage();
         
-        // 🛡️ OTIMIZAÇÃO EXTREMA: Bloqueia imagens, CSS e fontes para poupar muita RAM do Render
+        // 🛡️ OTIMIZAÇÃO: Bloqueia recursos pesados para poupar RAM
         await page.setRequestInterception(true);
         page.on('request', (req) => {
             if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
@@ -29,7 +29,6 @@ async function extrairDadosMercadoLivre(url) {
         });
 
         console.log(`📡 Navegando para: ${url}`);
-        // domcontentloaded carrega apenas a estrutura da página, ignorando a espera por scripts demorados
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
 
         // 1. Lida com o redirecionamento da vitrine (/social/)
@@ -39,7 +38,6 @@ async function extrairDadosMercadoLivre(url) {
                 await page.waitForNavigation({ timeout: 4000, waitUntil: 'domcontentloaded' }).catch(() => {});
             } catch (e) { }
 
-            // Se ainda não redirecionou, localiza o botão de compra e clica
             if (page.url().includes('/social/')) {
                 const linkProduto = await page.evaluate(() => {
                     const btn = document.querySelector('a.andes-button--primary');
@@ -58,9 +56,8 @@ async function extrairDadosMercadoLivre(url) {
 
         console.log("✅ Página alcançada! Copiando o HTML...");
         const html = await page.content();
-        await browser.close(); // Fecha o Chrome rapidamente para aliviar o servidor
 
-        // 2. Extração com Cheerio baseada no HTML real que o navegador enxergou
+        // 2. Extração com Cheerio
         const $ = cheerio.load(html);
         
         const titulo = $('meta[property="og:title"]').attr('content') || $('h1.ui-pdp-title').text().trim();
@@ -71,12 +68,29 @@ async function extrairDadosMercadoLivre(url) {
         let precoDeStr = "";
         let descCalculado = "";
 
-        const blocoPreco = $('.ui-pdp-price__second-line');
-        const reais = blocoPreco.find('.andes-money-amount__fraction').first().text().trim();
-        const centavos = blocoPreco.find('.andes-money-amount__cents').first().text().trim() || '00';
+        // 🎯 BUSCA AGRESSIVA DE PREÇO (3 TENTATIVAS)
+        let reais = $('.ui-pdp-price__second-line .andes-money-amount__fraction').first().text().trim();
+        let centavos = $('.ui-pdp-price__second-line .andes-money-amount__cents').first().text().trim() || '00';
         
+        if (!reais) {
+            // Tentativa 2: Busca genérica na primeira tag de preço da tela
+            reais = $('.ui-pdp-price .andes-money-amount__fraction').first().text().trim() || $('.andes-money-amount__fraction').first().text().trim();
+            centavos = $('.ui-pdp-price .andes-money-amount__cents').first().text().trim() || $('.andes-money-amount__cents').first().text().trim() || '00';
+        }
+
+        if (!reais) {
+            // Tentativa 3: Tag meta estruturada de SEO
+            const metaPreco = $('meta[itemprop="price"]').attr('content');
+            if (metaPreco) {
+                const partes = metaPreco.split('.');
+                reais = partes[0];
+                centavos = partes[1] || '00';
+            }
+        }
+
         if (reais) precoPorStr = `${reais},${centavos}`;
 
+        // Desconto
         const blocoDe = $('.ui-pdp-price__original-value');
         if (blocoDe.length > 0) {
             const reaisDe = blocoDe.find('.andes-money-amount__fraction').first().text().trim();
@@ -91,10 +105,15 @@ async function extrairDadosMercadoLivre(url) {
             }
         }
 
+        // 📸 O MODO DEBUG (TIRA PRINT SE FALHAR)
         if (!precoPorStr) {
-            console.log("⚠️ HTML carregado, mas o preço não foi encontrado. O layout pode ser diferente ou bloqueado.");
-            return null;
+            console.log("⚠️ Preço não encontrado. Tirando print da tela para enviar no Telegram...");
+            const screenshotBuffer = await page.screenshot({ fullPage: true });
+            await browser.close();
+            return { erroDebug: true, imagemPrint: screenshotBuffer }; 
         }
+
+        await browser.close(); // Tudo certo, fecha o navegador
 
         return {
             produto: titulo,
