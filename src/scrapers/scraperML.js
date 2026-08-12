@@ -25,7 +25,7 @@ async function extrairDadosMercadoLivre(url) {
             }
         }
 
-        // 2. Bypass da Vitrine (/social/) com Puppeteer
+        // 2. Bypass da Vitrine (/social/) com Puppeteer blindado contra redirects
         if (urlFinal.includes('/social/')) {
             console.log("🤖 Abrindo Chrome Fantasma para passar a vitrine...");
             browser = await puppeteer.launch({ 
@@ -34,19 +34,38 @@ async function extrairDadosMercadoLivre(url) {
             });
             const page = await browser.newPage();
             
-            await page.goto(urlFinal, { waitUntil: 'networkidle2', timeout: 30000 });
-            
-            const linkProduto = await page.evaluate(() => {
-                const botoes = Array.from(document.querySelectorAll('a'));
-                const botaoAlvo = botoes.find(b => b.innerText.toLowerCase().includes('ir para produto') || b.innerText.toLowerCase().includes('comprar agora'));
-                if (botaoAlvo) return botaoAlvo.href;
+            try {
+                // domcontentloaded é mais tolerante e não espera a rede inteira ficar ociosa
+                await page.goto(urlFinal, { waitUntil: 'domcontentloaded', timeout: 30000 });
                 
-                const btnPrimario = document.querySelector('a.andes-button--primary');
-                return btnPrimario ? btnPrimario.href : null;
-            });
+                // Dá 4 segundos para ver se o ML faz o redirecionamento automático sozinho
+                await page.waitForNavigation({ timeout: 4000, waitUntil: 'domcontentloaded' }).catch(() => {});
+                
+                const urlAtual = page.url();
 
-            if (linkProduto) urlFinal = linkProduto;
-            await browser.close(); 
+                // Se a URL ainda tem /social/, o redirecionamento falhou, então clicamos no botão
+                if (urlAtual.includes('/social/')) {
+                    const linkProduto = await page.evaluate(() => {
+                        const botoes = Array.from(document.querySelectorAll('a'));
+                        const botaoAlvo = botoes.find(b => b.innerText.toLowerCase().includes('ir para produto') || b.innerText.toLowerCase().includes('comprar agora'));
+                        if (botaoAlvo) return botaoAlvo.href;
+                        
+                        const btnPrimario = document.querySelector('a.andes-button--primary');
+                        return btnPrimario ? btnPrimario.href : null;
+                    });
+
+                    if (linkProduto) urlFinal = linkProduto;
+                } else {
+                    // O ML fez o trabalho por nós e já redirecionou para o produto!
+                    urlFinal = urlAtual;
+                }
+            } catch (err) {
+                // Se der "frame detached", não tem problema, nós apenas pegamos a URL pra onde ele foi jogado
+                console.log("⚠️ Redirecionamento agressivo detectado. Capturando a nova URL...");
+                urlFinal = page.url(); 
+            } finally {
+                await browser.close(); 
+            }
         }
 
         // 3. Extrair ID para montar a URL Limpa
