@@ -59,11 +59,7 @@ async function extrairDadosMercadoLivre(url) {
         // Separa apenas os números para evitar a duplicação do "MLB"
         const numerosId = matchMLB[2]; 
         const urlProdutoLimpa = `https://produto.mercadolivre.com.br/MLB-${numerosId}`;
-        console.log(`📡 Buscando HTML da página via Proxy para o ID: MLB-${numerosId}`);
-        
-        const idProduto = matchMLB[1].replace(/[-_]/g, '');
-        const urlProdutoLimpa = `https://produto.mercadolivre.com.br/MLB-${idProduto}`;
-        console.log(`📡 Buscando HTML da página via Proxy para o ID: ${idProduto}`);
+        console.log(`📡 Buscando HTML da página via Proxy para o ID: MLB-${numerosId}`);    
 
         // 4. ScraperAPI buscando o HTML puro da página (Rota SEO)
         const apiKey = process.env.SCRAPERAPI_KEY;
