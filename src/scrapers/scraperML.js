@@ -1,4 +1,4 @@
-const cheerio = require('cheerio');
+const axios = require('axios');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
@@ -11,115 +11,78 @@ const formatarPreco = (num) => {
 async function extrairDadosMercadoLivre(url) {
     let browser;
     try {
-        console.log("🤖 Abrindo Chrome Fantasma...");
-        browser = await puppeteer.launch({ 
-            headless: true, 
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'] 
-        });
-        const page = await browser.newPage();
-        
-        // 🛡️ OTIMIZAÇÃO: Bloqueia recursos pesados para poupar RAM
-        await page.setRequestInterception(true);
-        page.on('request', (req) => {
-            if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
-                req.abort();
-            } else {
-                req.continue();
-            }
-        });
+        let urlFinal = url;
 
-        console.log(`📡 Navegando para: ${url}`);
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
-
-        // 1. Lida com o redirecionamento da vitrine (/social/)
-        if (page.url().includes('/social/')) {
-            console.log("🎯 Vitrine detectada! Aguardando redirecionamento...");
-            try {
-                await page.waitForNavigation({ timeout: 4000, waitUntil: 'domcontentloaded' }).catch(() => {});
-            } catch (e) { }
+        // 1. Usamos o Fantasma APENAS para resolver links encurtados ou vitrines
+        if (url.includes('meli.la') || url.includes('/social/')) {
+            console.log("🤖 Abrindo Chrome Fantasma apenas para resolver o link...");
+            browser = await puppeteer.launch({ 
+                headless: true, 
+                args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+            });
+            const page = await browser.newPage();
+            
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
             if (page.url().includes('/social/')) {
-                const linkProduto = await page.evaluate(() => {
-                    const btn = document.querySelector('a.andes-button--primary');
-                    if (btn) return btn.href;
-                    const links = Array.from(document.querySelectorAll('a'));
-                    const btnAlvo = links.find(b => b.innerText.toLowerCase().includes('ir para produto'));
-                    return btnAlvo ? btnAlvo.href : null;
-                });
-
-                if (linkProduto) {
-                    console.log("🔗 Indo para a página final do produto...");
-                    await page.goto(linkProduto, { waitUntil: 'domcontentloaded', timeout: 45000 });
+                console.log("🎯 Vitrine detectada! Aguardando redirecionamento...");
+                await page.waitForNavigation({ timeout: 4000, waitUntil: 'domcontentloaded' }).catch(() => {});
+                
+                if (page.url().includes('/social/')) {
+                    const linkProduto = await page.evaluate(() => {
+                        const btn = document.querySelector('a.andes-button--primary');
+                        return btn ? btn.href : null;
+                    });
+                    if (linkProduto) urlFinal = linkProduto;
+                } else {
+                    urlFinal = page.url();
                 }
+            } else {
+                urlFinal = page.url();
             }
+            await browser.close();
+            console.log("✅ Link resolvido!");
         }
 
-        console.log("✅ Página alcançada! Copiando o HTML...");
-        const html = await page.content();
+        // 2. Extraímos o ID limpo (MLB + Números)
+        const matchMLB = urlFinal.match(/(MLB)[-_]?(\d+)/i);
+        if (!matchMLB) {
+            console.log("❌ Não achei o ID do produto na URL:", urlFinal);
+            return null;
+        }
+        
+        const idProduto = `MLB${matchMLB[2]}`;
+        console.log(`📡 Consultando a API Oficial do ML para o ID: ${idProduto}`);
 
-        // 2. Extração com Cheerio
-        const $ = cheerio.load(html);
+        // 3. O XEQUE-MATE: Bater na API pública (Livre de Captchas HTML)
+        const apiRes = await axios.get(`https://api.mercadolibre.com/items/${idProduto}`);
+        const dados = apiRes.data;
+
+        // 4. Mapear o JSON limpinho
+        const titulo = dados.title;
+        const precoPorNum = dados.price;
+        const precoDeNum = dados.original_price || 0;
+        const freteGratis = dados.shipping && dados.shipping.free_shipping;
         
-        const titulo = $('meta[property="og:title"]').attr('content') || $('h1.ui-pdp-title').text().trim();
-        const urlImagem = $('meta[property="og:image"]').attr('content');
-        const freteGratis = html.toLowerCase().includes('frete grátis') || html.toLowerCase().includes('grátis');
-        
-        let precoPorStr = "";
+        // Pega a primeira imagem de alta qualidade
+        const urlImagem = (dados.pictures && dados.pictures.length > 0) 
+            ? dados.pictures[0].secure_url 
+            : dados.thumbnail;
+
+        let precoPorStr = formatarPreco(precoPorNum);
         let precoDeStr = "";
         let descCalculado = "";
 
-        // 🎯 BUSCA AGRESSIVA DE PREÇO (3 TENTATIVAS)
-        let reais = $('.ui-pdp-price__second-line .andes-money-amount__fraction').first().text().trim();
-        let centavos = $('.ui-pdp-price__second-line .andes-money-amount__cents').first().text().trim() || '00';
-        
-        if (!reais) {
-            // Tentativa 2: Busca genérica na primeira tag de preço da tela
-            reais = $('.ui-pdp-price .andes-money-amount__fraction').first().text().trim() || $('.andes-money-amount__fraction').first().text().trim();
-            centavos = $('.ui-pdp-price .andes-money-amount__cents').first().text().trim() || $('.andes-money-amount__cents').first().text().trim() || '00';
+        if (precoDeNum > precoPorNum) {
+            precoDeStr = formatarPreco(precoDeNum);
+            descCalculado = `-${Math.round(((precoDeNum - precoPorNum) / precoDeNum) * 100)}%`;
         }
-
-        if (!reais) {
-            // Tentativa 3: Tag meta estruturada de SEO
-            const metaPreco = $('meta[itemprop="price"]').attr('content');
-            if (metaPreco) {
-                const partes = metaPreco.split('.');
-                reais = partes[0];
-                centavos = partes[1] || '00';
-            }
-        }
-
-        if (reais) precoPorStr = `${reais},${centavos}`;
-
-        // Desconto
-        const blocoDe = $('.ui-pdp-price__original-value');
-        if (blocoDe.length > 0) {
-            const reaisDe = blocoDe.find('.andes-money-amount__fraction').first().text().trim();
-            const centavosDe = blocoDe.find('.andes-money-amount__cents').first().text().trim() || '00';
-            if (reaisDe) {
-                precoDeStr = `${reaisDe},${centavosDe}`;
-                const numDe = parseFloat(`${reaisDe}.${centavosDe}`);
-                const numPor = parseFloat(`${reais.replace('.', '')}.${centavos}`);
-                if (numDe > numPor) {
-                    descCalculado = `-${Math.round(((numDe - numPor) / numDe) * 100)}%`;
-                }
-            }
-        }
-
-        // 📸 O MODO DEBUG (TIRA PRINT SE FALHAR)
-        if (!precoPorStr) {
-            console.log("⚠️ Preço não encontrado. Tirando print da tela para enviar no Telegram...");
-            const screenshotBuffer = await page.screenshot({ fullPage: true });
-            await browser.close();
-            return { erroDebug: true, imagemPrint: screenshotBuffer }; 
-        }
-
-        await browser.close(); // Tudo certo, fecha o navegador
 
         return {
             produto: titulo,
             precoDe: precoDeStr,
             precoPor: precoPorStr,
-            numDeOriginal: precoDeStr ? parseFloat(precoDeStr.replace('.', '').replace(',', '.')) : 0,
+            numDeOriginal: precoDeNum,
             descCalculado: descCalculado,
             freteGratis: freteGratis,
             link: url, 
@@ -129,7 +92,7 @@ async function extrairDadosMercadoLivre(url) {
         };
 
     } catch (error) {
-        console.error("❌ Erro fatal no Puppeteer:", error.message);
+        console.error("❌ Erro no fluxo da API:", error.message);
         if (browser) await browser.close();
         return null;
     }
