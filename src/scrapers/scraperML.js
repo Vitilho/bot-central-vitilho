@@ -80,7 +80,7 @@ async function extrairDadosMercadoLivre(url) {
         const urlProdutoLimpa = `https://produto.mercadolivre.com.br/MLB-${numerosId}`;
         console.log(`📡 Buscando HTML da página via Proxy para o ID: MLB-${numerosId}`);    
 
-        // 4. ScraperAPI buscando o HTML puro da página (Com sistema de Retries)
+        // 4. ScraperAPI buscando o HTML (Modo Econômico + Plano B)
         const apiKey = process.env.SCRAPERAPI_KEY;
         let html;
         let tentativas = 3;
@@ -89,8 +89,8 @@ async function extrairDadosMercadoLivre(url) {
         while (tentativas > 0 && !sucessoProxy) {
             try {
                 if (apiKey) {
-                    const proxyUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(urlProdutoLimpa)}&premium=true&country_code=br`;
-                    // Configuramos um timeout no Axios para ele não ficar preso esperando o ScraperAPI eternamente
+                    // Removido o premium=true para evitar limite de créditos, mantendo apenas o IP BR
+                    const proxyUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(urlProdutoLimpa)}&country_code=br`;
                     const apiRes = await axios.get(proxyUrl, { timeout: 35000 });
                     html = apiRes.data;
                     sucessoProxy = true;
@@ -101,13 +101,22 @@ async function extrairDadosMercadoLivre(url) {
                 }
             } catch (erroProxy) {
                 tentativas--;
-                console.log(`⚠️ Ocorreu uma instabilidade no Proxy. Tentativas restantes: ${tentativas}`);
+                console.log(`⚠️ Instabilidade no Proxy. Tentativas restantes: ${tentativas}`);
+                
                 if (tentativas === 0) {
-                    console.log("❌ O Proxy falhou em todas as tentativas.");
-                    throw erroProxy; // Joga para o catch final da função
+                    console.log("❌ Proxy esgotado. Acionando o Plano B (Acesso direto do Render)...");
+                    try {
+                        // Plano B: O servidor tenta acessar sem proxy usando um User-Agent forte
+                        const resDireta = await axios.get(urlProdutoLimpa, { headers: headersAxios, timeout: 15000 });
+                        html = resDireta.data;
+                        sucessoProxy = true;
+                    } catch (erroDireto) {
+                        console.log("❌ O Plano B também falhou. O Mercado Livre bloqueou a conexão.");
+                        throw erroDireto; // Joga para o catch final
+                    }
+                } else {
+                    await new Promise(resolve => setTimeout(resolve, 2000));
                 }
-                // Pausa de 2 segundos antes de tentar de novo (dá tempo do ScraperAPI trocar a rota)
-                await new Promise(resolve => setTimeout(resolve, 2000));
             }
         }
 
