@@ -71,7 +71,7 @@ bot.on('text', async (ctx) => {
     }
 });
 
-bot.launch();
+bot.launch({ dropPendingUpdates: true });
 console.log('🤖 Bot rodando com arquitetura modular!');
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
