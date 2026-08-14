@@ -38,19 +38,16 @@ async function extrairDadosMercadoLivre(url) {
             console.log("✅ Link resolvido para: " + urlFinal);
         }
         
-        // 2. Extração Inteligente do ID (Prioriza parâmetros reais do anúncio)
+        // 2. Extração Inteligente do ID (Ignorando a armadilha do Hash)
         let idProduto = null;
-        try {
-            const urlObj = new URL(urlFinal);
-            // Procura nos parâmetros da URL primeiro (onde ficam os IDs verdadeiros em links de catálogo)
-            const wid = urlObj.searchParams.get('wid') || urlObj.searchParams.get('item_id');
-            if (wid && wid.toUpperCase().startsWith('MLB')) {
-                idProduto = wid.toUpperCase();
-            }
-        } catch (e) { }
-
-        // Se não achou nos parâmetros, faz o fallback para a Regex tradicional
-        if (!idProduto) {
+        
+        // Caça o verdadeiro ID (wid ou item_id) em qualquer lugar da URL, mesmo depois da hashtag
+        const matchReal = urlFinal.match(/(?:wid=|item_id(?:%3A|=))(MLB\d+)/i);
+        
+        if (matchReal) {
+            idProduto = matchReal[1].toUpperCase();
+        } else {
+            // Fallback para o primeiro MLB encontrado na estrutura padrão
             const matchMLB = urlFinal.match(/(MLB)[-_]?(\d+)/i);
             if (!matchMLB) {
                 console.log("❌ Não achei o ID do produto na URL:", urlFinal);
@@ -59,7 +56,7 @@ async function extrairDadosMercadoLivre(url) {
             idProduto = `MLB${matchMLB[2]}`;
         }
         
-        console.log(`📡 Consultando a API Oficial do ML para o ID: ${idProduto}`);
+        console.log(`📡 Consultando a API Oficial do ML para o ID verdadeiro: ${idProduto}`);
 
         // 3. O XEQUE-MATE: Bater na API pública com Disfarce e Plano de Fuga
         const headersAxios = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' };
