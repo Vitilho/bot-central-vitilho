@@ -17,19 +17,17 @@ async function extrairDadosMercadoLivre(url) {
         });
         const page = await browser.newPage();
         
-        // 🎭 O DISFARCE SUPREMO (SEO BYPASS): Fingindo ser o rastreador oficial do Google
-        await page.setUserAgent('Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)');
-        await page.setExtraHTTPHeaders({
-            'X-Forwarded-For': '66.249.66.1', // Falsifica a origem simulando um IP real do Google
-            'Accept-Language': 'pt-BR,pt;q=0.9'
-        });
+        // 🎭 O DISFARCE: Usuário comum no Windows
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
         await page.setViewport({ width: 1366, height: 768 });
 
-        console.log("📡 Acessando a página como Googlebot...");
+        console.log("📡 Acessando a página...");
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
 
-        // 1. Resolve links encurtados ou de vitrine
-        if (page.url().includes('/social/')) {
+        let urlFinal = page.url();
+
+        // 1. Resolve links de vitrine
+        if (urlFinal.includes('/social/')) {
             console.log("🎯 Vitrine detectada! Extraindo link do produto...");
             await new Promise(resolve => setTimeout(resolve, 2000));
 
@@ -39,10 +37,27 @@ async function extrairDadosMercadoLivre(url) {
                 return linkComID ? linkComID.href : null;
             });
 
-            if (productLink) {
-                console.log("🔗 Redirecionando para a página final: " + productLink);
-                await page.goto(productLink, { waitUntil: 'domcontentloaded', timeout: 45000 });
-            }
+            if (productLink) urlFinal = productLink;
+        }
+
+        // 2. Extração do ID Verdadeiro
+        let idProduto = null;
+        const matchReal = urlFinal.match(/(?:wid=|item_id(?:%3A|=))(MLB\d+)/i);
+        
+        if (matchReal) {
+            idProduto = matchReal[1].toUpperCase();
+        } else {
+            const matchMLB = urlFinal.match(/(MLB)[-_]?(\d+)/i);
+            if (matchMLB) idProduto = `MLB${matchMLB[2]}`;
+        }
+
+        // 3. O PULO DO GATO: Reconstruir a URL Clássica para fugir da barreira do catálogo
+        if (idProduto) {
+            const idFormatado = idProduto.replace('MLB', 'MLB-');
+            const urlClassica = `https://produto.mercadolivre.com.br/${idFormatado}-produto`;
+            
+            console.log("🔗 Fugindo do Catálogo! Redirecionando para a URL Clássica: " + urlClassica);
+            await page.goto(urlClassica, { waitUntil: 'domcontentloaded', timeout: 45000 });
         }
 
         console.log("✅ Página alcançada. Aguardando dados visuais...");
@@ -53,7 +68,7 @@ async function extrairDadosMercadoLivre(url) {
             console.log("⚠️ Demora na renderização. Tentando ler mesmo assim...");
         }
 
-        // 2. Extração de Dados
+        // 4. Extração de Dados direto do HTML visual
         const dadosPagina = await page.evaluate(() => {
             const getText = (selector) => document.querySelector(selector)?.innerText?.trim();
             
@@ -84,7 +99,7 @@ async function extrairDadosMercadoLivre(url) {
 
         await browser.close();
 
-        // 3. Formatação
+        // 5. Formatação Final
         let precoPorStr = `${dadosPagina.reais},${dadosPagina.centavos}`;
         let precoDeStr = "";
         let descCalculado = "";
