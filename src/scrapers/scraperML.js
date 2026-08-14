@@ -12,17 +12,20 @@ async function extrairDadosMercadoLivre(url) {
                 '--no-sandbox', 
                 '--disable-setuid-sandbox', 
                 '--disable-blink-features=AutomationControlled',
-                '--window-size=1366,768' // Tamanho de tela real de notebook
+                '--window-size=1366,768'
             ] 
         });
         const page = await browser.newPage();
         
-        // 🎭 O DISFARCE: Fingindo ser um usuário comum no Windows
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+        // 🎭 O DISFARCE SUPREMO (SEO BYPASS): Fingindo ser o rastreador oficial do Google
+        await page.setUserAgent('Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)');
+        await page.setExtraHTTPHeaders({
+            'X-Forwarded-For': '66.249.66.1', // Falsifica a origem simulando um IP real do Google
+            'Accept-Language': 'pt-BR,pt;q=0.9'
+        });
         await page.setViewport({ width: 1366, height: 768 });
 
-        console.log("📡 Acessando a página...");
-        // Deixamos a página carregar tudo naturalmente (Evita o Captcha!)
+        console.log("📡 Acessando a página como Googlebot...");
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
 
         // 1. Resolve links encurtados ou de vitrine
@@ -44,14 +47,13 @@ async function extrairDadosMercadoLivre(url) {
 
         console.log("✅ Página alcançada. Aguardando dados visuais...");
         
-        // Espera o preço aparecer na tela para garantir que o React carregou
         try {
             await page.waitForSelector('.andes-money-amount__fraction', { timeout: 8000 });
         } catch (e) {
             console.log("⚠️ Demora na renderização. Tentando ler mesmo assim...");
         }
 
-        // 2. Extração de Dados direto do HTML visual
+        // 2. Extração de Dados
         const dadosPagina = await page.evaluate(() => {
             const getText = (selector) => document.querySelector(selector)?.innerText?.trim();
             
@@ -61,11 +63,9 @@ async function extrairDadosMercadoLivre(url) {
                      
             let image = document.querySelector('meta[property="og:image"]')?.content;
             
-            // Busca Preço Atual
             let reais = getText('.ui-pdp-price__second-line .andes-money-amount__fraction') || getText('.andes-money-amount__fraction');
             let centavos = getText('.ui-pdp-price__second-line .andes-money-amount__cents') || getText('.andes-money-amount__cents') || '00';
             
-            // Busca Preço Original (De)
             let origReais = getText('.ui-pdp-price__original-value .andes-money-amount__fraction');
             let origCentavos = getText('.ui-pdp-price__original-value .andes-money-amount__cents') || '00';
             
@@ -74,7 +74,7 @@ async function extrairDadosMercadoLivre(url) {
             return { title, image, reais, centavos, origReais, origCentavos, isFree };
         });
 
-        // 📸 DEBUG VISUAL: Se não achar o título ou preço, tira print pra gente ver!
+        // 📸 DEBUG VISUAL
         if (!dadosPagina.title || !dadosPagina.reais) {
             console.log("❌ Falha na leitura visual. Tirando print...");
             const screenshotBuffer = await page.screenshot({ fullPage: true });
@@ -84,7 +84,7 @@ async function extrairDadosMercadoLivre(url) {
 
         await browser.close();
 
-        // 3. Formatação Final
+        // 3. Formatação
         let precoPorStr = `${dadosPagina.reais},${dadosPagina.centavos}`;
         let precoDeStr = "";
         let descCalculado = "";
