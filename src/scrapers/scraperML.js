@@ -1,46 +1,47 @@
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const axios = require('axios'); // Voltamos com o Axios para a requisição final
 puppeteer.use(StealthPlugin());
+
+const formatarPreco = (num) => {
+    if (num === null || num === undefined) return "0,00";
+    return num.toFixed(2).replace('.', ',');
+};
 
 async function extrairDadosMercadoLivre(url) {
     let browser;
     try {
-        console.log("🤖 Abrindo Chrome Fantasma...");
+        console.log("🤖 Abrindo Chrome Fantasma apenas para mapear o link...");
         browser = await puppeteer.launch({ 
             headless: true, 
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox', 
-                '--disable-blink-features=AutomationControlled',
-                '--window-size=1366,768'
-            ] 
+            args: ['--no-sandbox', '--disable-setuid-sandbox'] 
         });
         const page = await browser.newPage();
-        
-        // 🎭 O DISFARCE: Usuário comum no Windows
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
-        await page.setViewport({ width: 1366, height: 768 });
 
-        console.log("📡 Acessando a página...");
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        console.log("📡 Acessando a página original...");
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
         let urlFinal = page.url();
 
-        // 1. Resolve links de vitrine
+        // 1. Resolve o redirecionamento da Vitrine
         if (urlFinal.includes('/social/')) {
-            console.log("🎯 Vitrine detectada! Extraindo link do produto...");
+            console.log("🎯 Vitrine detectada! Aguardando redirecionamento interno...");
             await new Promise(resolve => setTimeout(resolve, 2000));
-
+            
             const productLink = await page.evaluate(() => {
                 const links = Array.from(document.querySelectorAll('a'));
                 const linkComID = links.find(l => l.href.match(/MLB[-_]?\d+/i));
                 return linkComID ? linkComID.href : null;
             });
-
             if (productLink) urlFinal = productLink;
         }
 
-        // 2. Extração do ID Verdadeiro
+        // Já resolvemos o link, não precisamos mais do navegador pesado!
+        await browser.close(); 
+        console.log("✅ Navegador desligado. Link resolvido para: " + urlFinal);
+
+        // 2. Extração Cirúrgica do ID
         let idProduto = null;
         const matchReal = urlFinal.match(/(?:wid=|item_id(?:%3A|=))(MLB\d+)/i);
         
@@ -51,81 +52,75 @@ async function extrairDadosMercadoLivre(url) {
             if (matchMLB) idProduto = `MLB${matchMLB[2]}`;
         }
 
-        // 3. O PULO DO GATO: Reconstruir a URL Clássica para fugir da barreira do catálogo
-        if (idProduto) {
-            const idFormatado = idProduto.replace('MLB', 'MLB-');
-            const urlClassica = `https://produto.mercadolivre.com.br/${idFormatado}-produto`;
-            
-            console.log("🔗 Fugindo do Catálogo! Redirecionando para a URL Clássica: " + urlClassica);
-            await page.goto(urlClassica, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        if (!idProduto) {
+            console.log("❌ Falha ao encontrar a assinatura do ID no link.");
+            return null;
         }
 
-        console.log("✅ Página alcançada. Aguardando dados visuais...");
-        
-        try {
-            await page.waitForSelector('.andes-money-amount__fraction', { timeout: 8000 });
-        } catch (e) {
-            console.log("⚠️ Demora na renderização. Tentando ler mesmo assim...");
-        }
+        console.log(`🎯 ID capturado: ${idProduto}. Iniciando extração remota...`);
 
-        // 4. Extração de Dados direto do HTML visual
-        const dadosPagina = await page.evaluate(() => {
-            const getText = (selector) => document.querySelector(selector)?.innerText?.trim();
-            
-            let title = document.querySelector('meta[property="og:title"]')?.content 
-                     || document.title.split(' |')[0] 
-                     || getText('h1.ui-pdp-title');
-                     
-            let image = document.querySelector('meta[property="og:image"]')?.content;
-            
-            let reais = getText('.ui-pdp-price__second-line .andes-money-amount__fraction') || getText('.andes-money-amount__fraction');
-            let centavos = getText('.ui-pdp-price__second-line .andes-money-amount__cents') || getText('.andes-money-amount__cents') || '00';
-            
-            let origReais = getText('.ui-pdp-price__original-value .andes-money-amount__fraction');
-            let origCentavos = getText('.ui-pdp-price__original-value .andes-money-amount__cents') || '00';
-            
-            let isFree = document.body.innerText.toLowerCase().includes('frete grátis') || document.body.innerText.toLowerCase().includes('grátis');
+        // 3. A CARTADA FINAL: Bater na API Pública usando Proxies Intermediários
+        const urlApiML = `https://api.mercadolibre.com/items/${idProduto}`;
+        let dados = null;
 
-            return { title, image, reais, centavos, origReais, origCentavos, isFree };
-        });
+        // Lista de "laranjas" (Proxies Públicos) para mascarar o IP do Render
+        const rotas = [
+            `https://api.allorigins.win/raw?url=${encodeURIComponent(urlApiML)}`,
+            `https://api.codetabs.com/v1/proxy/?quest=${urlApiML}`,
+            urlApiML // Último recurso: bater direto do Render
+        ];
 
-        // 📸 DEBUG VISUAL
-        if (!dadosPagina.title || !dadosPagina.reais) {
-            console.log("❌ Falha na leitura visual. Tirando print...");
-            const screenshotBuffer = await page.screenshot({ fullPage: true });
-            await browser.close();
-            return { erroDebug: true, imagemPrint: screenshotBuffer }; 
-        }
-
-        await browser.close();
-
-        // 5. Formatação Final
-        let precoPorStr = `${dadosPagina.reais},${dadosPagina.centavos}`;
-        let precoDeStr = "";
-        let descCalculado = "";
-        let numDeOriginal = 0;
-
-        if (dadosPagina.origReais) {
-            precoDeStr = `${dadosPagina.origReais},${dadosPagina.origCentavos}`;
-            numDeOriginal = parseFloat(`${dadosPagina.origReais}.${dadosPagina.origCentavos}`);
-            const numPor = parseFloat(`${dadosPagina.reais.replace('.', '')}.${dadosPagina.centavos}`);
-            
-            if (numDeOriginal > numPor) {
-                descCalculado = `-${Math.round(((numDeOriginal - numPor) / numDeOriginal) * 100)}%`;
+        for (const rota of rotas) {
+            try {
+                console.log(`📡 Disparando API via: ${rota.split('/')[2]}`);
+                const res = await axios.get(rota, { timeout: 15000 });
+                
+                if (res.data && res.data.title) {
+                    dados = res.data;
+                    console.log("✅ JSON da API capturado com sucesso!");
+                    break; // Sai do loop de tentativas se deu certo
+                }
+            } catch (e) {
+                console.log(`⚠️ Rota falhou. Tentando a próxima alternativa...`);
             }
         }
 
+        if (!dados) {
+            console.log("❌ Todas as rotas foram barradas pelo WAF.");
+            return null;
+        }
+
+        // 4. Formatação Final dos Dados
+        const titulo = dados.title;
+        const precoPorNum = dados.price;
+        const precoDeNum = dados.original_price || 0;
+        const freteGratis = dados.shipping && dados.shipping.free_shipping;
+        
+        const urlImagem = (dados.pictures && dados.pictures.length > 0) 
+            ? dados.pictures[0].secure_url 
+            : dados.thumbnail;
+
+        let precoPorStr = formatarPreco(precoPorNum);
+        let precoDeStr = "";
+        let descCalculado = "";
+        let numDeOriginal = precoDeNum;
+
+        if (precoDeNum > precoPorNum) {
+            precoDeStr = formatarPreco(precoDeNum);
+            descCalculado = `-${Math.round(((precoDeNum - precoPorNum) / precoDeNum) * 100)}%`;
+        }
+
         return {
-            produto: dadosPagina.title,
+            produto: titulo,
             precoDe: precoDeStr,
             precoPor: precoPorStr,
             numDeOriginal: numDeOriginal,
             descCalculado: descCalculado,
-            freteGratis: dadosPagina.isFree,
+            freteGratis: freteGratis,
             link: url, 
             loja: "Mercado Livre",
             cupom: "",
-            imagem: dadosPagina.image
+            imagem: urlImagem
         };
 
     } catch (error) {
