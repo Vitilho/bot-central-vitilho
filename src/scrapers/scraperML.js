@@ -33,7 +33,7 @@ async function extrairDadosMercadoLivre(url) {
             console.log("✅ Link resolvido para: " + urlFinal);
         }
 
-        // 2. Extração Cirúrgica do ID (Ignorando Hash)
+        // 2. Extração Cirúrgica do ID
         let idProduto = null;
         const matchReal = urlFinal.match(/(?:wid=|item_id(?:%3A|=))(MLB\d+)/i);
         
@@ -49,24 +49,28 @@ async function extrairDadosMercadoLivre(url) {
             idProduto = `MLB${matchMLB[2]}`;
         }
         
-        console.log(`📡 Consultando a API Oficial via Chrome Fantasma para o ID: ${idProduto}`);
+        console.log(`📡 Consultando a API Oficial via AJAX nativo para o ID: ${idProduto}`);
 
-        // 3. O CAVALO DE TROIA: Usar o próprio navegador invisível para ler a API
-        await page.goto(`https://api.mercadolibre.com/items/${idProduto}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        
-        // Extrai o texto puro da tela (O JSON que a API devolve)
-        const jsonText = await page.evaluate(() => document.body.innerText);
-        
-        await browser.close(); // Tarefa concluída, pode desligar o motor
+        // 3. O CAVALO DE TROIA: Disparar um Fetch por debaixo dos panos na página atual!
+        const dados = await page.evaluate(async (id) => {
+            try {
+                const res = await fetch(`https://api.mercadolibre.com/items/${id}`);
+                const data = await res.json();
+                return data;
+            } catch (err) {
+                return { error_interno: err.message };
+            }
+        }, idProduto);
 
-        const dados = JSON.parse(jsonText);
+        await browser.close(); 
 
-        if (dados.error) {
-            console.log("❌ Erro retornado pela API do ML:", dados.message);
+        // 🛡️ Blindagem contra retornos inesperados
+        if (!dados || dados.error_interno || dados.error) {
+            console.log("❌ Erro retornado pela API ou Fetch:", dados);
             return null;
         }
 
-        // 4. Mapear o JSON limpinho
+        // 4. Mapear o JSON
         const titulo = dados.title;
         const precoPorNum = dados.price;
         const precoDeNum = dados.original_price || 0;
